@@ -1,0 +1,417 @@
+\documentclass[conference]{IEEEtran}
+% \documentclass[conference]{../sty/IEEEtran}
+
+% *** CITATION PACKAGES ***
+%\usepackage{cite}
+
+
+% *** GRAPHICS RELATED PACKAGES ***
+\usepackage[pdftex]{graphicx}
+% \graphicspath{{../pdf/}{../jpeg/}}
+% \DeclareGraphicsExtensions{.pdf,.jpeg,.png}
+
+% *** MATH PACKAGES ***
+\usepackage[cmex10]{amsmath}
+\usepackage{amssymb}
+%\interdisplaylinepenalty=2500
+
+% *** SPECIALIZED LIST PACKAGES ***
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+
+% *** ALIGNMENT PACKAGES ***
+\usepackage{array}
+%\usepackage{mdwmath}
+%\usepackage{mdwtab}
+
+%\usepackage{eqparbox}
+
+% *** SUBFIGURE PACKAGES ***
+\usepackage[caption=false,font=footnotesize]{subfig}
+
+% *** FLOAT PACKAGES ***
+%\usepackage{fixltx2e}
+%\usepackage{stfloats}
+%\fnbelowfloat
+
+% *** PDF, URL AND HYPERLINK PACKAGES ***
+%\usepackage{url}
+% \url{my_url_here}.
+
+% correct bad hyphenation here
+%\hyphenation{op-tical net-works semi-conduc-tor}
+
+\makeatletter
+\def\BState{\State\hskip-\ALG@thistlm}
+\makeatother
+
+%================================================================================================
+\begin{document}
+
+\title{Adding new words into a language model using parameters of known words with similar behavior}
+
+\author{\IEEEauthorblockN{Luiza Orosanu, Denis Jouvet}
+\IEEEauthorblockA{Speech Group, LORIA\\
+Inria, Villers-l\`{e}s-Nancy, F-54600, France \\
+Universit\'{e} de Lorraine, LORIA, UMR 7503, Villers-l\`{e}s-Nancy, F-54600, France \\
+CNRS, LORIA, UMR 7503, Villers-l\`{e}s-Nancy, F-54600, France \\
+Email: \{luiza.orosanu, denis.jouvet\}@loria.fr}
+}
+
+\maketitle
+
+\begin{abstract}
+This article presents a study on how to automatically add new words into a language model without re-training it or adapting it (which requires a lot of new data).
+The proposed approach consists in finding a list of similar words for each new word to be added in the language model.
+Based on a small set of sentences containing the new words and on a set of n-gram counts containing the known words, we search for known words which have the most similar neighbor distribution (of the few preceding and few following neighbor words) to the new words. 
+The similar words are determined through the computation of KL divergences on the distribution of neighbor words.
+The n-gram parameter values associated to the similar words are then used to define the n-gram parameter values of the new words. 
+In the context of speech recognition, the performance assessment on a LVCSR task shows the benefit of the proposed approach.
+\end{abstract}
+\begin{IEEEkeywords}
+speech-to-text transcriptions, language modeling, OOV words, similar words, part-of-speech tags, lemmas
+\end{IEEEkeywords}
+
+
+%================================================================================================
+\section{Introduction}
+%================================================================================================
+
+One of the main drawbacks of speech recognition systems is their incapacity to recognize words that do not belong to their vocabulary. Given the limited amount of speech training data, and also the limits in memory size and computational power that are imposed by any automatic speech recognizer, it would be impossible to conceive a system that covers all the words. Out-of-vocabulary (OOV) words will always be encountered, regardless the size of the vocabulary or the numerous general domains on which we train the language models (LM). As a result, when an OOV word is pronounced the speech recognition system will be forced to replace it with other short in-vocabulary words that are acoustically similar \cite{Young:1996, Woodland:2000, Ketabdar:2007}. 
+
+A large vocabulary continuous speech recognition (LVCSR) system can be very efficient when it's applied on similar domains to those on which it was trained. 
+However, when there is a mismatch between the training data and the application domain, all the frequent words specific to the new domain will be treated as OOV words. 
+
+There are several options for solving this problem. The most classic solution suggests an adaptation of the language model \cite{Bellegarda:2004}, in order to learn the n-gram probabilities associated to the new words. But the adaptation can not be successful if there is not enough suitable data associated to the new words (such data is not always easy to find). 
+
+A different approach would use the data available on-line to estimate frequencies of unseen bi-grams \cite{Keller:2003}. 
+
+Another solution would be to use class-based language models \cite{Suhm:1994}. 
+In this case, a new word has to be assigned to a predefined class. 
+In the past, scientists would let the user decide to which class an unknown word belonged to \cite{Asadi:1991}. 
+But this can also be achieved automatically, based on the similarity between the new word and the in-class words, which can be estimated with the frequency of co-occurrence between two words \cite{Brown:1992}, morphological tags \cite{Prazak:2007} or the cosine-similarity between word vectors (which model the relation between words) \cite{Naptali:2012}.
+Other class based language models that have enough general classes can even effectively model unseen events \cite{Zitouni:2007}. 
+A class based unigram model can also be used to assess unigram probabilities for unseen words (based on morpho-syntactic similarity) which will then be included in a baseline language model \cite{Martins:2008}. 
+
+A solution on word-based language models that uses the similarity between words has been studied in \cite{Lecorve:2011}. 
+They search for specific n-gram sequences in which the OOV words are most semantically consistent and they keep the most frequent ones. Then they compute the conditional probabilities of solely those sequences, which are afterwards added to the language model. 
+
+Similarity measures based on word cooccurrence have been studied in \cite{Dagan:1999} with a different objective: to create similarity-based language models. Their proposed methods make use of the Kullback-Leibler (KL) divergence, Jensesn-Shannon divergence, L1 norm and confusion probabilities. 
+
+Our alternative solution proposes to directly define and add to a word-based language model the n-gram entries of new words, based on the similarity of the new words with in-vocabulary words. Our approach is based on similar neighbor distributions and it requires very little data related to the new words (5 sentences for each new word are sufficient to achieve good results). 
+We start by searching for words similar to the new words. Two data sets are thus required: a small list of sentences containing the new words (to establish a minimal list of usual neighbors) and a set of n-gram counts where to search for their similar words (i.e. words having similar neighbor distributions). For more consistent results, both data sets are tagged with their corresponding "word$|$part-of-speech" and "lemma$|$part-of-speech" units. The (dis)similarity measure between two words is defined as the KL divergence of their neighbor distributions. Once the list of similar words is defined, all their n-gram probabilities (unigrams, bigrams and trigrams) are transposed on the new words.
+
+The paper is organized as follows: Section 2 is devoted to the description of the data and tools used in our experiments, Section 3 provides a description of the methodology used to find similar words and to infer the n-gram parameters associated to new words, and Section 4 presents and analyzes the results.
+
+%=======================================================================================
+\section{Experimental setup}
+%=======================================================================================
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Data}
+
+The speech corpora used in our experiments come from the ESTER2 \cite{Galliano:2009} and the ETAPE \cite{Gravier:2012} evaluation campaigns, and the EPAC \cite{Esteve:2010} project. 
+The ESTER2 and EPAC data are French broadcast news (prepared speech, plus interviews) of mainly studio quality.
+The ETAPE data correspond to debates collected from various radio and TV channels (mainly spontaneous speech).
+The speech data of the ESTER2 and ETAPE train sets, as well as the transcribed data from the EPAC corpus (which amounts to almost 300 hours of signal and almost 4 million running words), were used to train the acoustic models. 
+%The speech data of the ESTER2 development set was used to evaluate the decoding performance of different language models. 
+
+In order to assess the performance of our approach for adding new words to a language model, two reference language models are needed: a \textit{baseline} model - to illustrate the performance achieved when the new words are unknown to the system and an \textit{ORACLE} model - trained on a large-vocabulary and on a large data set, to illustrate the maximum performance achieved when the new words are already known and properly trained. 
+
+The \textit{ORACLE} language model was trained on various text corpora, using a lexicon of 100k words. 
+The text corpora includes more than 500 million words of newspaper data from 1987 to 2007;
+several million words from transcriptions of various radio broadcast shows; 
+more than 800 million words from the French Gigaword corpus \cite{Mendoca:2011} from 1994 to 2008;
+plus 300 million words of web data collected in 2011 from various web sources, and thus mainly covering recent years.
+
+The \textit{baseline} language model is trained on the same data as the ORACLE model, but with a few words missing from its vocabulary. 
+We selected a list of 20 nouns, seen between 50 and 100 times in the development sets of ESTER2 and ETAPE. 
+We added to that list their feminine, masculine and plural forms (to avoid the speech recognizer choosing one of those words as replacements based on their similar pronunciation). 
+The final list of 44 words correspond to the English words \{evening, place/spot, government, moment, example, problem, power, turn/tower, level, number, group, history, journal, security, meeting, project, year, war, day, report\}. 
+These words were removed from the ORACLE's lexicon in order to define the baseline's lexicon, which means that they are `unknown' words in the baseline language model.
+In the experiments section they designate the "new words" that will be added to the baseline language model.
+
+Table \ref{Tab:LMs} describes the sizes of the two language models used as reference in our experiments.
+
+\begin{table}[!t]
+\caption{Sizes of the two reference language models}
+\label{Tab:LMs}
+\centering
+\begin{tabular}{|r|r|r|r|}
+\hline
+{\bf Language model}  	& uni-grams 	& bi-grams 	& tri-grams 	\\ \hline
+ORACLE  		& 97 349  	& 43.3M  	& 80.1M 	\\ \hline
+baseline 		& 97 305  	& 42.9M   	& 79.2M		\\ \hline
+\end{tabular}
+\end{table}
+
+The pronunciation variants were extracted from the BDLEX lexicon \cite{Calmes:1998} and from in-house pronunciation lexicons, when available. 
+For the missing words, the pronunciation variants were automatically obtained using JMM-based and CRF-based Grapheme-to-Phoneme converters \cite{Illina:2011, Jouvet:2012}. 
+
+The Wikipedia corpus \cite{WikipediaFR}  and the GigaWord corpus \cite{Mendoca:2011} are used to extract examples of sentences containing the new words.
+The Wikipedia corpus is also used for finding words similar to the new words. All sentences were tagged with their `word$|$PoS-tag' units and with their `lemma$|$PoS-tag' units. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Configuration}
+
+The SRILM tools \cite{Stolcke:2002} were used to create the statistical language models. 
+The TreeTagger software \cite{Schmid:1994} was used to annotate words with lemmas and part-of-speech (PoS) tags.
+
+The Sphinx3 tools \cite{Placeway:1996} were used to train the phonetic acoustic models and to decode the audio signals. 
+The MFCC (Mel Frequency Cepstral Coefficients) acoustic analysis gives 12 MFCC parameters and a logarithmic energy per frame (window of 32
+ms, 10 ms shift). 
+The context-dependent phonetic acoustic HMM models were modeled with 64 Gaussian mixtures, and adapted to male and female data. 
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Methodology}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Finding similar words}
+
+In the proposed approach, a list of in-vocabulary words is associated to each new word based on the similarity between their neighbor distributions. Two words are considered as similar if they appear in similar contexts.
+
+\subsubsection{Computing neighbor distribution of new words}
+
+A data set is needed in order to provide information about the new words.
+It can be recovered from existing corpora, from the web or be manually composed. 
+The preceding and succeeding neighbors of the new words are extracted from all sentences in order to compute their probability distributions. 
+
+Each new word \textit{m} leads to the determination of the probability distributions $P_{k}(w|m)$ of all neighbors \textit{w} found in each position \textit{k} (related to the new word), with $k=\{\ldots,-3,-2,-1,+1,+2,+3,\ldots\}$.
+
+\subsubsection{Computing neighbor distribution of known words}
+
+A different data set is used to represent the `known' words. Its 2-gram counts define the 2-neighbor distributions (-1,+1), its 3-gram counts define the 4-neighbor distributions (-2,-1,+1,+2), and so on.
+The preceding and succeeding neighbors of each `known' word are extracted from the n-gram sequences found in the corresponding counts file in order to compute their probability distributions.
+
+Each `known' word \textit{x} leads to the determination of the probability distributions $P_{k}(w'|x)$ of all neighbors \textit{w'} found in each position \textit{k} , with $k=\{\ldots,-3,-2,-1,+1,+2,+3,\ldots\}$.
+ 
+
+\subsubsection{Comparing neighbor distributions}
+
+The (dis)similarity between the neighbor distributions of a new word \textit{m} and a known word \textit{x} is assessed by the KL divergence  \cite{Kullback:1951}, on each neighbor position \textit{k}:
+
+\begin{center}$D_{k}(x,m)=D_{KL}(P_{k}(w|x) || P_{k}(w|m))$\end{center}
+
+where 
+$D_{KL}(P||Q)=\sum_{w}^{ }  P(w) \cdot log\frac{P(w)}{Q(w)}$.
+
+The KL divergence is computed over the \textit{w} neighbors of the new words in each position \textit{k}. If a word \textit{w} is not present in the known word's neighbors list, its probability is replaced with a default small value $\lambda$ (in our experiments $\lambda=1e^{-7}$).
+
+The overall (dis)similarity measure between two words is defined as the sum over all neighbor positions \textit{k}: 
+
+\begin{center}$D(x,m)=\sum_{k}^{ }  D_{k}(x,m)$\end{center}
+
+The list of most similar words to a new word are those having minimal divergences. 
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Adding new n-grams to the language model}
+
+The following algorithm describes how to define and add ngrams for new words `nW' that are similar to known words `kW' (previously saved in the `similarWords(nW)' list) into a baseline language model `LM'.
+
+\begin{algorithm}
+\caption{Add new n-grams to a language model}\label{addNewNgrams}
+\begin{algorithmic}[1]
+\Procedure{addNgrams}{\textbf{nW}}
+\State {newLM} $\leftarrow$ LM
+\State {newNgrams} $\leftarrow$ $\varnothing$
+\BState \emph{\# process the reference ngrams}
+\For {\textbf{each} ngram $\in$ LM}
+	\For {\textbf{each} kW $\in$ similarWords(\textbf{nW})}
+		\If {$contains$(ngram, kW)}		
+			\State ngram\textbf{'} $\leftarrow$ $replace$(ngram, kW, nW)
+			\State push(newNgrams, ngram\textbf{'})
+		\EndIf
+	\EndFor
+\EndFor
+
+\BState \emph{\# choose the new ngrams to add to the newLM}
+\State S  $\leftarrow$ $getUniqueSequences$(newNgrams)
+\For {\textbf{each} seq $\in$ S}
+	\If {$frequency$(seq) = 1}
+		\State prob  $\leftarrow$ $getProbability$(seq)
+	\Else
+		\State P  $\leftarrow$ $getProbabilities$(seq)
+		\State prob $\leftarrow$ $medianProbability$(P)
+	\EndIf
+	\State push(newLM,  ``prob seq'')
+\EndFor
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+For a given new word, this algorithm looks for ngrams related to its similar words and defines new ngrams by replacing the `similar words' by the `new word'.
+Note that replacing the known words with the new words (that they are similar to) might results in multiple ngrams having the same word sequence with different probabilities. In this case, only the median probability is kept for the corresponding word sequence.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Experiments and Results}
+
+\subsection{Setup for the similar words search}
+
+We start the experiments section by presenting the different options used to define the similar words, with a few examples. 
+
+\subsubsection{New words}
+
+\{5,10,20,50\} random sentences were extracted for each new word from the Wikipedia and GigaWord corpora and different probability distributions were tested by using \{2 neighbors, 4 neighbors, 6 neighbors\}.
+
+To give an example of 6 neighbors, let us consider the sentence 
+``les précipitations sont également \textit{réparties} \textit{sur} \textit{l'} \textbf{année} \textit{avec} \textit{un} \textit{total} de 610 millimètres de pluie'', where the new word ``année" has: 
+as a -3 neighbor the word  `réparties', 
+as a -2 neighbor the word  `sur', 
+as a +1 neighbor the word  `avec', 
+..., 
+and as a +3 neighbor the word  `total'.
+
+\subsubsection{Known words}
+
+The `known' words belong to the Wikipedia corpus and to the baseline lexicon.
+ 
+From the 4-gram sequence ``cèdent leur place à":
+the word \underline{cèdent} has a +1 neighbor `leur', a +2 neighbor `place' and a +3 neighbor `à';
+the word \underline{leur} has a -1 neighbor `cèdent', a +1 neighbor `place' and a +2 neighbor `à';
+the word \underline{place} has a -2 neighbor `cèdent', a -1 neighbor `leur' and a +1 neighbor `à';
+the word \underline{à} has a -3 neighbor `cèdent', a -2 neighbor `leur' and a -1 neighbor `place'.
+
+
+\subsubsection{Known words associated to new words}
+
+Different lists of similar words are obtained when using either word-based sentences, `word$|$PoStag'-based sentences or `lemma$|$PoStag'-based sentences.
+
+Here is an example of 10 similar words (translated from French to English for better comprehension) obtained for the new word "journal", based on 10 examples of sentences, 4-gram Wikipedia counts and 6 neighbor distributions:
+\begin{itemize}
+\item based on word sentences : name, first, title, game, book, even, world, magazine, novel, second
+\item based on word$|$PoStag sentences : magazine, name, title, game, book, world, service, text, program, network
+\item based on lemma$|$PoStag sentences : chronicle, title, magazine, name, series, book, version, game, program, press. 
+\end{itemize}
+
+Note that words can have different meanings in different contexts. Also, the `lemma$|$PoStag' sentences can not be used when adding feminine, masculine and plural forms of words (since all words are reduced to root form). 
+
+The similar words obtained on the "word$|$PoStag" sentences and on the 6 neighbors probability distributions are the only ones considered in the experiments reported next. 
+
+\subsection{New language models}
+
+Two different settings were evaluated in our experiments: adding only the uni-grams or all the n-grams  (unigrams, bigrams and trigrams)  computed for the 44 new words to the baseline language model.
+
+Several lists of similar words have been evaluated when using \{5, 10, 20, 50\} examples of sentences for each new word. Only 10 word matches are considered for each new word.
+
+Based on these 4 lists of similar words we created 4 different new language models with added uni-grams (baseline+1grams) and 4 different new language models with added n-grams (baseline+Ngrams).    
+
+The `baseline+1grams' LMs have only an increased number of uni-grams (from 97305 to 97349) compared to the baseline LM. The number of bi-grams and tri-grams associated with the `baseline+Ngrams' LMs are presented in table \ref{Tab:AddedNgrams}. They add between 1.7 to 1.9 million bi-grams and between 10.6 to 11.6 million tri-grams to the baseline LM.
+
+\begin{table}[!t]
+\caption{Number of bi-grams and tri-grams of the new `baseline+addedNgrams' language models}
+\label{Tab:AddedNgrams}
+\centerline
+{
+\begin{tabular}{|r|r|r|r|r|}
+\cline{2-5}
+\multicolumn{1}{c|}{}  	& \multicolumn{4}{c|}{\# examples of sentences}			\\ \cline{2-5}
+\multicolumn{1}{c|}{}  	& 5 		& 10 		& 20 		& 50 		\\ \hline
+\#bi-grams  		& 44.65M	& 44.63M	& 44.75M	& 44.79M	\\ \hline
+\#tri-grams 		& 89.77M	& 89.27M	& 90.45M	& 90.79M	\\ \hline
+\end{tabular}
+}
+\end{table}
+
+
+\subsection{Decoding performance of different LMs}
+
+The language models are evaluated over the  ESTER2 development data set, in which the set of 44 words have a total occurrence frequency of 1.33\%.
+
+Table \ref{Tab:RefStats} displays the word-error-rates (\textit{WER}) and the percentage of new words that are correctly recognized with both reference language models. The difference of 2\% in the WER performance is due to the 44 words that are unknown in the baseline language model.
+
+\begin{table}[!t]
+\caption{Reference statistics obtained on both reference language models}
+\label{Tab:RefStats}
+\centering
+\begin{tabular}{|r|r|r|}
+\hline
+{\bf Language model} 	& {\bf globalWER} 	& {\bf new words correctRec.}	\\ \hline
+ORACLE 			& 24.79			& 84.91				\\ \hline
+baseline 		& 26.79			& 0.00				\\ \hline
+\end{tabular}
+\end{table}
+
+Table \ref{Tab:WER} and \ref{Tab:CR} present the WER and the percentage of new words that are correctly recognized with the new language models, when using various amounts of example sentences per new word (5, 10, 20, 50).
+Adding only 1-grams for new words to the LM (`baseline+1grams') hardly improves the WER, and correctly recognizes only 25\% of the new words. 
+However, adding n-grams for new words to the LM (`baseline+Ngrams') provides 1.30\% absolute WER improvement over the baseline model and is only 0.70\% worse than the ORACLE model. Moreover, it correctly recognizes up to 65\% of the new words. 
+Good results can be achieved with 5, 10 examples of sentences per each new word (using more examples provides no real improvement). 
+
+These results show that our similarity approach and our method to add new n-grams to a language model are efficient. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Conclusions}
+
+This paper proposed a new approach to directly define and add into a word-based language model n-gram entries for new words, based on the similarity of the new words with in-vocabulary words. 
+
+Our approach is based on similar neighbor distributions (two words are considered as similar if they appear in similar contexts) and it requires very little data related to the new words (5 sentences for each new word are sufficient to achieve good results).
+The n-gram parameter values associated to the similar words are then used to define the n-gram parameter values of the new words. 
+
+Adding only 1-grams for new words hardly improves the performance. 
+However, adding n-grams (i.e., 1-grams, 2-grams and 3-grams) for new words provides results close to the ORACLE's performance. 
+The results shows that our similarity approach and our method to add new n-grams into a language model are efficient.
+
+Future work will investigate further the setups for finding similar words. 
+The n-grams of new words will also be filtered in order to diminish the size of new language models.
+The impact of other parameters will also be evaluated (e.g. the number of similar words considered for each new word).
+
+
+\begin{table}[!t]
+\caption{WER of the new `baseline+added1grams' and `baseline+addedNgrams' LMs on the ESTER2 development set}
+\label{Tab:WER}
+\centerline
+{
+\begin{tabular}{|r|r|r|r|r|}
+\cline{2-5}
+\multicolumn{1}{c|}{}  	& \multicolumn{4}{c|}{\# examples of sentences}		\\ \cline{2-5}
+\multicolumn{1}{c|}{}  	& 5 		& 10 		& 20 		& 50 	\\ \hline
+baseline+added1grams  	& 26.45		& 26.44		& 26.40		& 26.42	\\ \hline
+baseline+addedNgrams	& 25.68		& 25.51		& 25.51		& 25.57	\\ \hline
+\end{tabular}
+}
+\end{table}
+
+\begin{table}[!t]
+\caption{Percentage of new words that are correctly recognized with the new `baseline+added1grams' and `baseline+addedNgrams' LMs on the ESTER2 development set}
+\label{Tab:CR}
+\centerline
+{
+\begin{tabular}{|r|r|r|r|r|}
+\cline{2-5}
+\multicolumn{1}{c|}{}  	& \multicolumn{4}{c|}{\# examples of sentences}		\\ \cline{2-5}
+\multicolumn{1}{c|}{}  	& 5 		& 10 		& 20 		& 50 	\\ \hline
+baseline+added1grams  	& 29.81		& 20.00		& 22.18		& 20.36	\\ \hline
+baseline+addedNgrams	& 60.54		& 61.81		& 64.90		& 62.76	\\ \hline
+\end{tabular}
+}
+\end{table}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section*{Acknowledgements}
+
+The work presented in this article is part of the RAPSODIE project, and has received
+support from the ``Conseil R\'{e}gional de Lorraine" and from the ``R\'{e}gion Lorraine" (FEDER) (http://erocca.com/rapsodie).
+
+%=======================================================================================
+% references section
+%=======================================================================================
+
+% trigger a \newpage just before the given reference number - balance the columns on the last page; adjust value as needed - readjust if the document is modified later
+
+%\IEEEtriggeratref{8}
+
+% The "triggered" command can be changed if desired:
+%\IEEEtriggercmd{\enlargethispage{-5in}}
+
+\bibliographystyle{IEEEtran}
+\bibliography{myBib_NW}
+
+\end{document}
+
+
